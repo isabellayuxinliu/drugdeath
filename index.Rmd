@@ -1,22 +1,38 @@
 ---
 title: "Drug death analysis"
 author: Isabella Liu
-output: html_notebook
+output: 
+  html_document:
+    fig_caption: yes
+    theme: cerulean
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+    
 ---
 
 ●	Introduction (.5-1 page of text, 25 pts):
+
 ○	Introduce (in words) the dataset and question (5 pts)
+
 ○	1-2 key plots or tables illustrating your exploratory data analysis (10 pts)
+
 ○	Description and justification of the methodology you will use in your analysis (10 pts)
+
 
 # Introduction
 The dataset I found on Kaggle was about Drug overdose deaths which includes accidental drug related deaths during 2012-2018. As described in the metadata, the rate of overdose deaths in Connecticut increased from 9.9 per 100,000 residents in 2012 to 28.5 per 100,000 residents in 2018-a 221 % increase-with the majority occurring among persons aged 35-64 (65.3 %), men (73.9 %), and non-Hispanic whites (78.5 %). Among deaths involving fentanyl, the overall deaths escalated from 5.2 deaths per 100,000 residents in 2015 to 21.3 deaths per 100,000 residents in 2018 and more than 50% of these fentanyl-related deaths involved polysubstance use.
 
 Procedures:
+
 First I would like to do EDA on the dataset to get general idea of the data such that what features are contained and how are they distributed.
+
 Second, apply smoothing, regression, and associated tests on the potential questions I am interested in:
+
 * how are drugs overdoes deaths distributed in and related to gender, age, race, time and the location that he/she has dead?
+
 * what drug causes the most death?
+
 * predict the death likelihood based on the drugs people use?
 
 #  EDA
