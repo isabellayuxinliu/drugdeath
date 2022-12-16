@@ -1,0 +1,195 @@
+---
+title: "Drug death analysis"
+author: Isabella Liu
+output: html_notebook
+---
+
+●	Introduction (.5-1 page of text, 25 pts):
+○	Introduce (in words) the dataset and question (5 pts)
+○	1-2 key plots or tables illustrating your exploratory data analysis (10 pts)
+○	Description and justification of the methodology you will use in your analysis (10 pts)
+
+# Introduction
+The dataset I found on Kaggle was about Drug overdose deaths which includes accidental drug related deaths during 2012-2018. As described in the metadata, the rate of overdose deaths in Connecticut increased from 9.9 per 100,000 residents in 2012 to 28.5 per 100,000 residents in 2018-a 221 % increase-with the majority occurring among persons aged 35-64 (65.3 %), men (73.9 %), and non-Hispanic whites (78.5 %). Among deaths involving fentanyl, the overall deaths escalated from 5.2 deaths per 100,000 residents in 2015 to 21.3 deaths per 100,000 residents in 2018 and more than 50% of these fentanyl-related deaths involved polysubstance use.
+
+Procedures:
+First I would like to do EDA on the dataset to get general idea of the data such that what features are contained and how are they distributed.
+Second, apply smoothing, regression, and associated tests on the potential questions I am interested in:
+* how are drugs overdoes deaths distributed in and related to gender, age, race, time and the location that he/she has dead?
+* what drug causes the most death?
+* predict the death likelihood based on the drugs people use?
+
+#  EDA
+```{r}
+#load packages
+library(tidyr)
+library(tidyverse)
+library(data.table)
+library(caret)
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(janitor)
+library(scales)
+library(ggrepel)
+library(tidytext)
+library(viridis)
+```
+
+```{r}
+#load data
+df <- read.csv("drug_deaths.csv")
+df %>% summary()
+```
+```{r}
+# How does the dataset look like
+head(df)
+```
+
+
+```{r}
+#features with value count
+# age, race, gender, cause of death
+df%>% group_by(Sex)%>%filter(Sex!="Unknown"&Sex!="")%>%summarise(n=n())%>%ggplot(aes(x=Sex, y=n)) +
+  geom_bar(stat="identity",fill="darkblue",width=0.5)
+df%>% group_by(Race)%>%summarise(n=n())%>%ggplot(aes(x=reorder(Race,n), y=n)) +
+  geom_bar(stat="identity",fill="darkblue",width=0.5)+coord_flip()
+cod<- df%>% group_by(COD)%>%summarise(count=n())%>%arrange(desc(count))
+top_n(cod, n=20, count) %>%
+          ggplot(., aes(x=reorder(COD,count), y=count))+
+              geom_bar(stat='identity',fill="darkblue",width=0.5)+coord_flip()
+```
+
+
+```{r}
+age<-df %>% 
+  mutate(
+    # Create categories
+    age_group = dplyr::case_when(
+      Age <= 18            ~ "0-18",
+      Age > 18 & Age <= 36 ~ "19-36",
+      Age > 36 & Age <= 54 ~ "37-54",
+      Age > 54 & Age <=72   ~ "55-72",
+      Age >72 ~ ">72"
+    ),
+    # Convert to factor
+    age_group = factor(
+      age_group,
+      level = c("0-18", "19-36","37-54", "55-72",">72")
+    )
+  )
+age%>% group_by(age_group)%>%summarise(n=n())%>%ggplot(aes(x=age_group, y=n)) +
+  geom_bar(stat="identity",fill="darkblue",width=0.5)
+```
+After the EDA, I noticed there are a lot of missing data and the data is not quite clean as there are different ways to describe the same cause of death in the COD column, but essentially we are interested in the drug that cause the death. Also the some of the same values are written in both upper and lower cases. The drug variables are binary values which would be useful if they are combined in one column. There are many NAs as well but not in the columns that I'm interested in regarding this study, so I would leave them there for the moment.
+
+# data processing
+```{r}
+df$Fentanyl <- as.numeric(as.character(df$Fentanyl))
+df$Morphine_NotHeroin<-as.numeric(as.character(df$Morphine_NotHeroin))
+df2 <-
+  df %>% select(
+    "ID",
+    "Date",
+    "ResidenceState",
+    "Age",
+    "Race",
+    "Sex",
+    "COD",
+    "MannerofDeath",
+    "Location",
+    "Heroin",
+    "Fentanyl",
+    "Fentanyl_Analogue",
+    "Morphine_NotHeroin",
+    "Cocaine",
+    "Oxycodone",
+    "Oxymorphone",
+    "Ethanol",
+    "Hydrocodone",
+    "Benzodiazepine",
+    "Methadone",
+    "Amphet",
+    "Tramad",
+    "Hydromorphone"
+  ) %>% 
+  pivot_longer(
+    cols = c(
+    "Heroin",
+    "Fentanyl",
+    "Fentanyl_Analogue",
+    "Morphine_NotHeroin",
+    "Cocaine",
+    "Oxycodone",
+    "Oxymorphone",
+    "Ethanol",
+    "Hydrocodone",
+    "Benzodiazepine",
+    "Methadone",
+    "Amphet",
+    "Tramad",
+    "Hydromorphone"
+    ),
+    names_to = "drug_name",
+    values_to = "value",
+    values_drop_na = TRUE,
+  ) 
+```
+
+The new table contains 71462 rows and 11 columns which is much longer than the original dataset which contains 5105 unique observations. That's because some of the people in the data had used more than one drug.
+
+```{r}
+df2 %>%
+  filter(value != 0,
+         Sex != "Unknown",
+         Sex !="") %>%
+  group_by(drug_name, Sex) %>%
+  summarise(Count = sum(value), .groups = "drop") %>%
+  ungroup() %>%
+  mutate(sex = as.factor(Sex),
+         drug_name = reorder_within(drug_name, Count, Sex)) %>% 
+  mutate(countsum = sum(Count)) %>% 
+  ggplot(aes(
+    x = fct_reorder(drug_name, Count),
+    y = Count,
+    label = Count,
+    fill = drug_name
+  )) +
+  geom_col(width = 0.8) +
+  scale_y_continuous(expand = expansion(add = c(0, 600))) +
+  geom_text(hjust = -0.1, size = 3.5) +
+  coord_flip() +
+  scale_x_reordered() +
+  facet_wrap(vars(Sex), scales = "free") +
+  theme(legend.position = "none") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  scale_fill_viridis(discrete = TRUE, option = "D")+
+  labs(
+    title = "What drugs are most popular among The dead (by Gender)?",
+    subtitle = "Plot most popular drugs by Gender",
+    x = "Drug Name",
+    y = "Count"
+  )
+
+```
+```{r}
+df2 %>%
+  filter(value != 0,
+         Sex != "Unknown",
+         Sex !="") %>%
+  ggplot(aes(x = Sex, y = Age, fill=Sex)) + 
+  geom_boxplot() +
+  stat_summary(fun = "mean", geom = "point", shape = 8,
+               size = 2, color = "black")
+```
+
+●	Results (1 - 2.5 pages of text, 50 pts):
+○	The text in the results should guide the reader through your analysis and describe what each plot or table is showing, and how it relates to the central question you are trying to ask. Feel free to reiterate key concepts of the methodology and how they help analyze the question or topic.
+○	Route 2
+■	6+ key plots or tables illustrating your two major analyses (50 pts)
+
+●	Conclusion (.5 pages of text, 15 pts):
+○	Summary of your question, methods and results
+○	Additional topics can include:
+■	Was your analysis successful? Why or why not?
+■	What would you do if you had more time?
