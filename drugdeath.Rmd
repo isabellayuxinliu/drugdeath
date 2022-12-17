@@ -1,0 +1,280 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+Route 1.	Selecting a dataset that requires extensive scraping or wrangling, and using at least one major analysis.
+
+# Introduction
+In the United States, overdose fatalities continue to be a major cause of injury-related mortality. Opioids are a prominent factor in most overdose fatalities. In recent years, the number of fatalities involving stimulants (such cocaine and methamphetamine) and synthetic opioids (like fentanyl produced illegally) has skyrocketed. 
+
+There are far more nonfatal drug overdoses than fatal ones, and each one has its own emotional and financial costs. A person is more likely to experience another overdose if they have already had one. When an overdose victim is evaluated in the ED, there is a chance to avoid a recurrent overdose by connecting the patient to treatment that can enhance their health outcomes.
+
+Timely data help improve coordination and promote readiness among health departments, community members, healthcare providers, public health, law enforcement, and government agencies, for regional or multiple state overdose increases.
+
+The dataset I found on Kaggle was about Drug overdose deaths which includes accidental drug related deaths during 2012-2018. As described in the metadata,the number of overdose deaths in Connecticut increased from 9.9 per 100,000 people in 2012 to 28.5 per 100,000 people in 2018—a 221% increase—with the majority occurring among people aged 35–64 (65.3%), men, and non-Hispanic whites (78.5%)—all of whom made up the majority of the population. Fentanyl-related mortality increased overall from 5.2 deaths per 100,000 people in 2015 to 21.3 deaths per 100,000 people in 2018, and more than 50% of these deaths included polysubstance use.
+
+Procedures:
+
+To better understand how different drug overdose impact on different groups of people,
+
+First I would like to do EDA on the dataset to get general idea of the data such that what features are contained and how are they distributed.
+
+Second, apply smoothing and regressionon the potential questions I am interested in:
+
+* How are drugs overdoes deaths distributed in and related to gender, age, race, and time that he/she has dead?
+
+* What drug causes the most death?
+
+* Are the ages of death correlated to date? In other words, does the distribution of age for the death change over time?
+
+#  EDA and data processing
+```{r}
+#load packages
+library(tidyr)
+library(tidyverse)
+library(data.table)
+library(caret)
+library(ggplot2)
+library(dplyr)
+library(skimr)
+library(lubridate)
+library(janitor)
+library(scales)
+library(ggrepel)
+library(tidytext)
+library(viridis)
+```
+
+```{r}
+#load data
+df <- read.csv("drug_deaths.csv")
+df %>% summary()
+```
+```{r}
+# How does the dataset look like
+head(df)
+```
+
+```{r}
+#missing values?
+df %>% skim() %>% filter(n_missing != 0) %>% 
+  ggplot(aes(x = reorder(skim_variable, n_missing), y = n_missing, label = n_missing) )+
+  geom_col(fill="#69b3a2")+
+  geom_text(size = 2.8, hjust = 0.5)+
+  theme(legend.position = "none",axis.text.x = element_text(angle = 90))+
+  labs(title = "Missing Data Counts",
+       x = "Variables",
+       y = "Counts"
+  )
+```
+The problem is that there are many empty strings. Now It's time to convert them to `NA`.
+
+```{r}
+#replace all empty strings with NA
+df[df==""]<-NA 
+
+df %>% skim() %>% filter(n_missing != 0) %>% 
+  ggplot(aes(x = reorder(skim_variable, n_missing), y = n_missing, label = n_missing) )+
+  geom_col(fill="#69b3a2")+
+  geom_text(size = 2.8, hjust = 0.5)+
+  theme(legend.position = "none",axis.text.x = element_text(angle = 90))+
+  labs(title = "Missing Data Counts",
+       x = "Variables",
+       y = "Counts"
+  )
+```
+
+
+After the EDA, I noticed there are a lot of missing data and the data is not quite clean as there are different ways to describe the same cause of death in the COD column, but essentially we are interested in the drug that cause the death. Also the some of the same values are written in both upper and lower cases. The drug variables are binary values which would be useful if they are combined in one column. Most NAs in this dataset were shown as empty string. I have converted them to NAs yet still a lot of them are missing. Fortunately the most of the nulls are not in the columns that I'm interested in regarding this study, so I would leave them there for the moment.
+
+There are many columns mixed values in both upper and lowercases. It can be problem-causing when making graphs with `count`. Same value showing in different formats can be double-counted. I'm converting all strings in the dataset to uppercase.
+
+`Date` column is formatted in "m-d-Y H:M:S". For later time analysis, it would be easier to show only years in the strings. Here, I use lubridate package to extract year.
+```{r}
+df<-data.frame(lapply(df, function(v) {
+  if (is.character(v)) return(toupper(v))
+  else return(v)
+}))
+dates <- as.POSIXct(df$Date,format = "%m/%d/%Y %H:%M:%S", tz = "UTC")
+df$Date<-year(dates)
+```
+
+In order to get some general information out of the dataset, I am creating some visualization here.
+```{r}
+#features with value count
+# age, race, gender, cause of death
+df%>% group_by(Sex)%>%filter(Sex!="UNKNOWN"&!is.na(Sex))%>%summarise(n=n())%>%ggplot(aes(x=Sex, y=n)) +
+  geom_bar(stat="identity",fill="darkblue",width=0.5)+
+  labs(title = "Gender vs. Counts",
+       x = "Gender",
+       y = "Counts"
+  )
+df%>% group_by(Race)%>%summarise(n=n())%>%ggplot(aes(x=reorder(Race,n), y=n)) +
+  geom_bar(stat="identity",fill="darkblue",width=0.5)+coord_flip()+ 
+  labs(title = "Race vs. Counts",
+       x = "Race",
+       y = "Counts"
+  )
+
+cod<- df%>% group_by(COD)%>%summarise(count=n())%>%arrange(desc(count))
+top_n(cod, n=20, count) %>%
+          ggplot(., aes(x=reorder(COD,count), y=count))+
+              geom_bar(stat='identity',fill="darkblue",width=0.5)+coord_flip()+
+    labs(title = "Cause of Death vs. Counts",
+       x = "Cause of Death",
+       y = "Counts"
+  )
+```
+
+```{r}
+df<-df %>% 
+  mutate(
+    # Create categories
+    age_group = dplyr::case_when(
+      Age <= 18            ~ "0-18",
+      Age > 18 & Age <= 36 ~ "19-36",
+      Age > 36 & Age <= 54 ~ "37-54",
+      Age > 54 & Age <=72   ~ "55-72",
+      Age >72 ~ ">72"
+    ),
+    age_group = factor(
+      age_group,
+      level = c("0-18", "19-36","37-54", "55-72",">72")
+    )
+  )
+```
+
+```{r}
+age <- df %>%drop_na(age_group)%>%
+  group_by(age_group) %>%
+  summarise(n = n()) %>%
+  mutate(Freq = n/sum(n)) %>%
+  mutate(labels = scales::percent(Freq))
+
+ggplot(age, aes(x = "", y = Freq, fill = age_group)) +
+  geom_col() +
+  geom_text_repel(aes(label = labels),
+            position = position_stack(vjust = 0.5)) +
+  coord_polar(theta = "y")
+
+```
+
+
+As graphs showing above, the deaths of males are tripled the death of females. Most objectives in the dataset are white or Hispanic white group. The top causes of death are acute fentanyl intoxication, acute herion intoxication, multiple drug toxicity, resulted from use of fentanyl, herion, and combination of different drugs. Surprisingly, the overdose death happened mostly among people in 37-54 age group, rather younger or the elderly groups.
+
+Since the original dataset had each type of drug as columns(a wide dataset), I'm reshaping the dataset using pivot_longer to convert wide data into tidy data. 
+
+```{r message=FALSE, warning=FALSE}
+df$Fentanyl <- as.numeric(as.character(df$Fentanyl))
+df$Morphine_NotHeroin<-as.numeric(as.character(df$Morphine_NotHeroin))
+
+df2 <- df %>% select("ID","Date","ResidenceState","Age","age_group","Race","Sex","COD","MannerofDeath","Location","Heroin","Fentanyl","Fentanyl_Analogue","Morphine_NotHeroin","Cocaine","Oxycodone","Oxymorphone","Ethanol","Hydrocodone","Benzodiazepine","Methadone","Amphet","Tramad","Hydromorphone") %>% 
+  pivot_longer(cols = c("Heroin","Fentanyl","Fentanyl_Analogue","Morphine_NotHeroin","Cocaine","Oxycodone","Oxymorphone","Ethanol","Hydrocodone","Benzodiazepine","Methadone","Amphet","Tramad","Hydromorphone"),
+    names_to = "drug_name",
+    values_to = "value",
+    values_drop_na = TRUE) 
+df2<-data.frame(lapply(df2, function(v) {
+  if (is.character(v)) return(toupper(v))
+  else return(v)
+}))
+```
+
+The new table contains 71462 rows and 11 columns which is much longer than the original dataset which contains 5105 unique observations. That's because some of the people in the data had used more than one drug.
+
+
+```{r}
+df2 %>% filter(value != 0,Sex != "UNKNOWN", !is.na(Sex)) %>%
+  group_by(drug_name, Sex) %>%
+  summarise(Count = sum(value), .groups = "drop") %>%
+  mutate(sum = sum(Count)) %>%
+  ggplot(aes(x = reorder(drug_name, Count), y = Count, fill = Sex)) +
+  geom_col()+
+  coord_flip()+
+  labs(title = "drugs that caused overdose death in female and male",
+       x = "drug names",
+       y = "Counts"
+  )
+```
+From this graph, I learned that herion, fentanyl, cocaine, benzodiazepine, and ethanol are the top 5 drugs used among the dead.
+
+```{r}
+df2 %>%
+  filter(value != 0,
+         Sex != "UNKNOWN",
+         !is.na(Sex)) %>%
+  ggplot(aes(x = Sex, y = Age, fill=Sex)) + 
+  geom_boxplot() +
+  stat_summary(fun = "mean", geom = "point", shape = 8,
+               size = 2, color = "black")
+```
+# Smoothing
+```{r}
+df2%>%drop_na(Sex)%>%filter(Sex!="UNKNOWN")%>%ggplot(aes(Age)) +
+  geom_histogram()
+#smoothed
+df2%>%drop_na(Sex)%>%filter(Sex!="UNKNOWN")%>%ggplot(aes(Age,colour=Sex)) +
+  geom_density()
+```
+Slghtly difference in age distribution between female and male.
+
+```{r}
+# how does overdose death changed over time
+df2 %>%
+  filter(value != 0) %>%
+  group_by(Date) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+ggplot(aes(x = Date,y = Count)) +geom_col(fill="darkblue")
+```
+It is clearly shown in the graph that drug overdose death is increasing significantly as time goes by.
+
+## Now let's see if there's relationship between age and date.
+```{r}
+#regression
+try<-df%>%filter(Sex!="UNKNOWN")%>%drop_na(Age,Date,Sex)
+rho <- mean(scale(try$Age) * scale(try$Date))
+rho
+```
+
+The correlation coefficient is nearly 0. 
+
+What if we simulate it using Monte Carlo simulation? (Code adapted from chapter 17 Regression from http://rafalab.dfci.harvard.edu/dsbook/regression.html)
+```{r}
+R <- sample_n(try, 25, replace = TRUE) |> 
+  summarize(r = cor(Age, Date)) |> pull(r)
+B <- 1000
+N <- 25
+R <- replicate(B, {
+  sample_n(try, N, replace = TRUE) |> 
+    summarize(r=cor(Age, Date)) |> 
+    pull(r)
+})
+qplot(R, geom = "histogram", binwidth = 0.05, color = I("black"))
+```
+```{r}
+mean(R)
+```
+
+
+```{r}
+ggplot(aes(sample=R), data = data.frame(R)) + 
+  stat_qq() + 
+  geom_abline(intercept = mean(R), slope = sqrt((1-mean(R)^2)/(N-2)))
+```
+The distribution is converging to normal but the correlation coefficient is still around 0. Correlation is not always a good summary of the relationship between `age` and `date`.
+
+# Results
+```{r}
+#before and after 
+df
+df2
+```
+
+Extensive data wrangling was necessary was necessary. First of all, most of the NAs in the original dataset were shown in the format of empty strings while there were only a few actual `NA`s. Same values existed in both uppercase and lowercase. Date was appeared in useless HH-MM-SS format as all the data were were recorded as 12:00:00 AM and caused trouble when displaying how the distribution changed over time. Thus, I used lubridate package to extract and replace the column with only year in the string. The new table contains 71462 rows and 11 columns which is much longer than the original dataset which contains 5105 unique observations. That's because some of the people in the data had used more than one drug. The shortage is that more NAs were introduced as the NAs from the original dataset was doubled after `pivot_longer`.
+
+#	Conclusion:
+From the analysis above, we can tell the number of deaths in male is greater than female. The major death group is between age 37 to 54, while the mean death age for female is slightly higher than male. Herion, fentanyl, cocaine, benzodiazepine, and ethanol are the top 5 drugs used among the dead. Something to note it that the drug overdose death is increasing over year.
+
+I applied regression method to see if there was linear relationship between age and year, but the result showed no as the correlation coefficient is nearly 0. I then used Monte Carlo simulation to see if there's any change but still, the correlation coefficient is almost 0. I tried to scatterplotted age vs. year and saw mamy datapoints stacked together. I wouldn't say correlation is a good summary of the relationship between those two variables.
+
+The shortages of this dataset is that there isn't enough quantitative data for deep analysis including drug overdose death prediction as all datapoint given was dead. Unfortunately, with given data, there isn't much analysis can be performed besides some visualizations. It would be helpful if there's a similar dataset combined with drug use for both dead and alive cases, as well as doseage used and more information on the patient such as BMI. However, if I had more time, it is possible to do natural language processing using th e `descriptionofinjury` column. 
+
