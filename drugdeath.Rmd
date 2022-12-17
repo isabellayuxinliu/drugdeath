@@ -69,6 +69,7 @@ df %>% skim() %>% filter(n_missing != 0) %>%
 ```
 The problem is that there are many empty strings. Now It's time to convert them to `NA`.
 
+## missing values
 ```{r}
 #replace all empty strings with NA
 df[df==""]<-NA 
@@ -99,6 +100,7 @@ dates <- as.POSIXct(df$Date,format = "%m/%d/%Y %H:%M:%S", tz = "UTC")
 df$Date<-year(dates)
 ```
 
+## Visualizations
 In order to get some general information out of the dataset, I am creating some visualization here.
 ```{r}
 #features with value count
@@ -181,7 +183,7 @@ df2<-data.frame(lapply(df2, function(v) {
 
 The new table contains 71462 rows and 11 columns which is much longer than the original dataset which contains 5105 unique observations. That's because some of the people in the data had used more than one drug.
 
-
+## Drugs that caused overdose death in female and male
 ```{r}
 df2 %>% filter(value != 0,Sex != "UNKNOWN", !is.na(Sex)) %>%
   group_by(drug_name, Sex) %>%
@@ -207,7 +209,8 @@ df2 %>%
   stat_summary(fun = "mean", geom = "point", shape = 8,
                size = 2, color = "black")
 ```
-# Smoothing
+
+## Smoothing
 ```{r}
 df2%>%drop_na(Sex)%>%filter(Sex!="UNKNOWN")%>%ggplot(aes(Age)) +
   geom_histogram()
@@ -215,10 +218,10 @@ df2%>%drop_na(Sex)%>%filter(Sex!="UNKNOWN")%>%ggplot(aes(Age)) +
 df2%>%drop_na(Sex)%>%filter(Sex!="UNKNOWN")%>%ggplot(aes(Age,colour=Sex)) +
   geom_density()
 ```
-Slghtly difference in age distribution between female and male.
+Slightly difference in age distribution between female and male.
 
+## how does overdose death changed over time
 ```{r}
-# how does overdose death changed over time
 df2 %>%
   filter(value != 0) %>%
   group_by(Date) %>%
@@ -226,10 +229,9 @@ df2 %>%
 ggplot(aes(x = Date,y = Count)) +geom_col(fill="darkblue")
 ```
 It is clearly shown in the graph that drug overdose death is increasing significantly as time goes by.
-
-## Now let's see if there's relationship between age and date.
+## Regression
+Now let's see if there's relationship between age and date.
 ```{r}
-#regression
 try<-df%>%filter(Sex!="UNKNOWN")%>%drop_na(Age,Date,Sex)
 rho <- mean(scale(try$Age) * scale(try$Date))
 rho
@@ -269,12 +271,22 @@ df
 df2
 ```
 
+#	Conclusion
 Extensive data wrangling was necessary was necessary. First of all, most of the NAs in the original dataset were shown in the format of empty strings while there were only a few actual `NA`s. Same values existed in both uppercase and lowercase. Date was appeared in useless HH-MM-SS format as all the data were were recorded as 12:00:00 AM and caused trouble when displaying how the distribution changed over time. Thus, I used lubridate package to extract and replace the column with only year in the string. The new table contains 71462 rows and 11 columns which is much longer than the original dataset which contains 5105 unique observations. That's because some of the people in the data had used more than one drug. The shortage is that more NAs were introduced as the NAs from the original dataset was doubled after `pivot_longer`.
 
-#	Conclusion:
 From the analysis above, we can tell the number of deaths in male is greater than female. The major death group is between age 37 to 54, while the mean death age for female is slightly higher than male. Herion, fentanyl, cocaine, benzodiazepine, and ethanol are the top 5 drugs used among the dead. Something to note it that the drug overdose death is increasing over year.
 
 I applied regression method to see if there was linear relationship between age and year, but the result showed no as the correlation coefficient is nearly 0. I then used Monte Carlo simulation to see if there's any change but still, the correlation coefficient is almost 0. I tried to scatterplotted age vs. year and saw mamy datapoints stacked together. I wouldn't say correlation is a good summary of the relationship between those two variables.
 
 The shortages of this dataset is that there isn't enough quantitative data for deep analysis including drug overdose death prediction as all datapoint given was dead. Unfortunately, with given data, there isn't much analysis can be performed besides some visualizations. It would be helpful if there's a similar dataset combined with drug use for both dead and alive cases, as well as doseage used and more information on the patient such as BMI. However, if I had more time, it is possible to do natural language processing using th e `descriptionofinjury` column. 
 
+# Reference
+data source: https://www.kaggle.com/code/khsamaha/fatal-drug-overdose-eda/data   
+
+http://rafalab.dfci.harvard.edu/dsbook/
+
+https://www.cdc.gov/drugoverdose/epidemic/index.html
+
+# Appendix
+```{r ref.label=knitr::all_labels(), echo=TRUE}
+```
